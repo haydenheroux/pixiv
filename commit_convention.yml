@@ -1,0 +1,4 @@
+scopes:
+  - scraper: pixiv.net AJAX scraper
+  - cli: UI for command-line invocation
+  - tui: UI for interactive terminal invocation
