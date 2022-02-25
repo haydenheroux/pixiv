@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -17,11 +18,14 @@ const (
 
 var (
 	illustrations   []pixivapi.PixivIllustration
+	downloadLog     map[string]bool
 	currentIndex    int
 	currentFileName string
 )
 
-var helpStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render
+var dimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render
+var okStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B")).Render
+var errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555")).Render
 
 func main() {
 	m := model{
@@ -39,6 +43,7 @@ type model struct {
 
 func (_ model) Init() tea.Cmd {
 	illustrations, _ = pixivapi.GetTopIllustrations()
+	downloadLog = make(map[string]bool, 0)
 	return DownloadCmd()
 }
 
@@ -74,15 +79,38 @@ func (e model) View() string {
 	pad := strings.Repeat(" ", padding)
 	return "\n" +
 		pad + e.progress.View() + "\n\n" +
-		pad + helpStyle(currentFileName)
+		pad + dimStyle(currentFileName) + "\n\n" +
+		BuildDownloadLog()
 }
 
 func DownloadCmd() tea.Cmd {
 	return (func() tea.Msg {
 		currentIllustration := illustrations[currentIndex]
-		currentFileName = "temp-" + currentIllustration.Title + ".jpg"
-		pixivapi.DownloadIllustration(currentIllustration, currentFileName)
+		currentFileName = "temp-" + strings.Join(currentIllustration.Tags, "+") + ".jpg"
+		_, err := pixivapi.DownloadIllustration(currentIllustration, currentFileName)
+		if err != nil {
+			downloadLog[currentFileName] = true
+		} else {
+			downloadLog[currentFileName] = false
+		}
 		currentIndex = currentIndex + 1
 		return nil
 	})
+}
+
+func BuildDownloadLog() string {
+	pad := strings.Repeat(" ", padding)
+	var str string
+	for fileName, status := range downloadLog {
+		var indicator string
+		if status == true {
+			// There was an error
+			indicator = errorStyle("✗")
+		} else {
+			// No error
+			indicator = okStyle("✓")
+		}
+		str += fmt.Sprintf("%s[%s] %s\n", pad, indicator, dimStyle(fileName))
+	}
+	return str
 }
