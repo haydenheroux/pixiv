@@ -12,15 +12,17 @@ import (
 )
 
 const (
-	padding  = 2
-	maxWidth = 80
+	padding        = 2
+	maxWidth       = 80
+	maxQueueLength = 5
 )
 
 var (
-	illustrations   []pixivapi.PixivIllustration
-	downloadLog     map[string]bool
-	currentIndex    int
-	currentFileName string
+	illustrations    []pixivapi.PixivIllustration
+	downloadLog      map[string]bool
+	downloadLogQueue []string
+	currentIndex     int
+	currentFileName  string
 )
 
 var dimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render
@@ -80,7 +82,7 @@ func (e model) View() string {
 	return "\n" +
 		pad + e.progress.View() + "\n\n" +
 		pad + dimStyle(currentFileName) + "\n\n" +
-		BuildDownloadLog()
+		BuildDownloadLog() + "\n"
 }
 
 func DownloadCmd() tea.Cmd {
@@ -88,6 +90,12 @@ func DownloadCmd() tea.Cmd {
 		currentIllustration := illustrations[currentIndex]
 		currentFileName = "temp-" + strings.Join(currentIllustration.Tags, "+") + ".jpg"
 		_, err := pixivapi.DownloadIllustration(currentIllustration, currentFileName)
+		downloadLogQueue = append(downloadLogQueue, currentFileName)
+		for len(downloadLogQueue) > maxQueueLength {
+			removed := downloadLogQueue[0]
+			delete(downloadLog, removed)
+			downloadLogQueue = downloadLogQueue[1:]
+		}
 		if err != nil {
 			downloadLog[currentFileName] = true
 		} else {
@@ -101,8 +109,9 @@ func DownloadCmd() tea.Cmd {
 func BuildDownloadLog() string {
 	pad := strings.Repeat(" ", padding)
 	var str string
-	for fileName, status := range downloadLog {
+	for _, fileName := range downloadLogQueue {
 		var indicator string
+		status := downloadLog[fileName]
 		if status == true {
 			// There was an error
 			indicator = errorStyle("✗")
