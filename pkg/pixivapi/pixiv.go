@@ -3,25 +3,11 @@ package pixivapi
 import (
 	"encoding/json"
 	"io/ioutil"
-	"net/http"
 )
 
-func setupGet(url string, headers map[string]string) (*http.Client, *http.Request, error) {
-	client := &http.Client{}
-	req, err := http.NewRequest("GET", url, nil)
-
-	if err != nil {
-		return client, nil, err
-	}
-
-	for header := range headers {
-		req.Header.Add(header, headers[header])
-	}
-	return client, req, nil
-}
-
+// GetTopIllustrations spoofs Pixiv's AJAX requests to query the top illustrations
+// at the time of the request.
 func GetTopIllustrations() ([]PixivIllustration, error) {
-
 	client, req, _ := setupGet("https://www.pixiv.net/ajax/top/illust?mode=all&lang=en", defaultHeaders)
 	res, err := client.Do(req)
 	if err != nil {
