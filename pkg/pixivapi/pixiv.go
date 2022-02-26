@@ -2,6 +2,7 @@ package pixivapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 )
 
@@ -22,5 +23,23 @@ func GetTopIllustrations() ([]PixivIllustration, error) {
 	var body PixivResponseBody
 	json.Unmarshal([]byte(content), &body)
 	illustrations := body.Thumbnails.Illusts.IllustrationList
+	return illustrations, nil
+}
+
+func GetSearchIllustrations(query string) ([]PixivIllustration, error) {
+	url := fmt.Sprintf("https://www.pixiv.net/ajax/search/artworks/%s", query)
+	client, req, _ := setupGet(url, defaultHeaders)
+	res, err := client.Do(req)
+	if err != nil {
+		return make([]PixivIllustration, 0), err
+	}
+	defer res.Body.Close()
+	content, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return make([]PixivIllustration, 0), err
+	}
+	var body PixivSearchResponseBody
+	json.Unmarshal([]byte(content), &body)
+	illustrations := body.MangaIllustrations.Illusts.IllustrationList
 	return illustrations, nil
 }

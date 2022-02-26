@@ -4,12 +4,24 @@ type PixivResponseBody struct {
 	Thumbnails PixivThumbnails `json:"body"`
 }
 
+type PixivSearchResponseBody struct {
+	MangaIllustrations PixivMangaIllustrations `json:"body"`
+}
+
 type PixivThumbnails struct {
 	Illusts PixivIllustrations `json:"thumbnails"`
 }
 
+type PixivMangaIllustrations struct {
+	Illusts PixivIllustrationsData `json:"illustManga"`
+}
+
 type PixivIllustrations struct {
 	IllustrationList []PixivIllustration `json:"illust"`
+}
+
+type PixivIllustrationsData struct {
+	IllustrationList []PixivIllustration `json:"data"`
 }
 
 type PixivIllustration struct {
