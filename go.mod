@@ -7,6 +7,7 @@ go 1.17
 require haydenheroux.xyz/pixivapi v0.0.0-00010101000000-000000000000
 
 require (
+	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/charmbracelet/bubbles v0.10.3 // indirect
 	github.com/charmbracelet/bubbletea v0.20.0 // indirect
 	github.com/charmbracelet/harmonica v0.1.0 // indirect

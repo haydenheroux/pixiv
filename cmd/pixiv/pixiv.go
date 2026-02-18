@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"haydenheroux.xyz/pixivapi"
@@ -23,10 +24,19 @@ var dimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render
 var okStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B")).Render
 var errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555")).Render
 
+func createInput() textinput.Model {
+	input := textinput.New()
+	input.Placeholder = "Search..."
+	input.Focus()
+	input.CharLimit = 80
+	input.Width = maxWidth - 2*padding - 4
+	return input
+}
+
 func main() {
 	m := model{
 		progress: progress.New(progress.WithGradient("#8BE9FD", "#FF79C6")),
-		search:   "",
+		input:    createInput(),
 	}
 
 	if err := tea.NewProgram(m).Start(); err != nil {
@@ -35,8 +45,9 @@ func main() {
 }
 
 type model struct {
-	progress      progress.Model
-	search        string
+	progress progress.Model
+	input    textinput.Model
+
 	downloading   bool
 	illustrations []pixivapi.PixivIllustration
 
@@ -47,7 +58,7 @@ type model struct {
 }
 
 func (_ model) Init() tea.Cmd {
-	return nil
+	return textinput.Blink
 }
 
 type illustrationsMsg []pixivapi.PixivIllustration
@@ -94,13 +105,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "enter":
-			return m, GetResults(m.search)
-		case "ctrl+c":
+		switch msg.Type {
+		case tea.KeyEnter:
+			m.downloading = true
+			return m, GetResults(m.input.Value())
+		case tea.KeyCtrlC, tea.KeyEsc:
 			return m, tea.Quit
 		}
-		return m, nil
 
 	case illustrationsMsg:
 		m.illustrations = msg
@@ -125,18 +136,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			DownloadNext(m.illustrations[m.currentIndex]),
 			incr,
 		)
-
-	default:
-		return m, nil
 	}
+
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
 }
 
 func (m model) View() string {
-	pad := strings.Repeat(" ", padding)
-	return "\n" +
-		pad + m.progress.View() + "\n\n" +
-		pad + dimStyle(m.currentFileName) + "\n\n" +
-		BuildDownloadLog(m.queue, m.errors) + "\n"
+	if m.downloading {
+		pad := strings.Repeat(" ", padding)
+		return "\n" +
+			pad + m.progress.View() + "\n\n" +
+			pad + dimStyle(m.currentFileName) + "\n\n" +
+			buildDownloadLog(m.queue, m.errors) + "\n"
+	} else {
+		return m.input.View()
+	}
 }
 
 type downloadedMsg struct {
@@ -152,7 +168,7 @@ func DownloadNext(illustration pixivapi.PixivIllustration) tea.Cmd {
 	}
 }
 
-func BuildDownloadLog(filenames []string, statuses map[string]error) string {
+func buildDownloadLog(filenames []string, statuses map[string]error) string {
 	pad := strings.Repeat(" ", padding)
 	var str string
 	for _, name := range filenames {
