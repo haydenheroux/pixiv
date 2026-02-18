@@ -17,13 +17,7 @@ const (
 	maxQueueLength = 5
 )
 
-var (
-	illustrations    []pixivapi.PixivIllustration
-	downloadLog      map[string]bool
-	downloadLogQueue []string
-	currentIndex     int
-	currentFileName  string
-)
+var ()
 
 var dimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render
 var okStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B")).Render
@@ -32,6 +26,7 @@ var errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555")).Rende
 func main() {
 	m := model{
 		progress: progress.New(progress.WithGradient("#8BE9FD", "#FF79C6")),
+		search:   "",
 	}
 
 	if err := tea.NewProgram(m).Start(); err != nil {
@@ -40,86 +35,135 @@ func main() {
 }
 
 type model struct {
-	progress progress.Model
+	progress      progress.Model
+	search        string
+	downloading   bool
+	illustrations []pixivapi.PixivIllustration
+
+	errors          map[string]error
+	queue           []string
+	currentIndex    int
+	currentFileName string
 }
 
 func (_ model) Init() tea.Cmd {
-	illustrations, _ = pixivapi.GetTopIllustrations()
-	downloadLog = make(map[string]bool, 0)
-	return DownloadCmd()
+	return nil
+}
+
+type illustrationsMsg []pixivapi.PixivIllustration
+
+func GetResults(search string) tea.Cmd {
+	return func() tea.Msg {
+		illustrations := make([]pixivapi.PixivIllustration, 0)
+		if len(search) == 0 {
+			illustrations, _ = pixivapi.GetTopIllustrations()
+		} else {
+			illustrations, _ = pixivapi.GetSearchIllustrations(search)
+		}
+		return illustrationsMsg(illustrations)
+	}
+}
+
+func Resize(m model, width int) model {
+	m.progress.Width = width - padding*2 - 4
+	if m.progress.Width > maxWidth {
+		m.progress.Width = maxWidth
+	}
+	return m
+}
+
+func PushAndCycleQueue(m model, filename string) model {
+	m.queue = append(m.queue, filename)
+	for len(m.queue) > maxQueueLength {
+		removed := m.queue[0]
+		delete(m.errors, removed)
+		m.queue = m.queue[1:]
+	}
+	m.currentIndex = m.currentIndex + 1
+	return m
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.progress.Width = msg.Width - padding*2 - 4
-		if m.progress.Width > maxWidth {
-			m.progress.Width = maxWidth
-		}
-		return m, nil
+		return Resize(m, msg.Width), nil
 
 	case progress.FrameMsg:
 		progressModel, cmd := m.progress.Update(msg)
 		m.progress = progressModel.(progress.Model)
 		return m, cmd
 
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "enter":
+			return m, GetResults(m.search)
+		case "ctrl+c":
+			return m, tea.Quit
+		}
+		return m, nil
+
+	case illustrationsMsg:
+		m.illustrations = msg
+		m.errors = make(map[string]error)
+		return m, DownloadNext(m.illustrations[0])
+
+	case downloadedMsg:
+		m = PushAndCycleQueue(m, msg.filename)
+		m.errors[msg.filename] = msg.err
+
+		progressDone := m.progress.Percent() >= 1.0
+		allDownloaded := m.currentIndex >= len(m.illustrations)
+
+		if progressDone || allDownloaded {
+			return m, tea.Quit
+		}
+
+		delta := 1 / float64(len(m.illustrations))
+		incr := m.progress.IncrPercent(delta)
+
+		return m, tea.Batch(
+			DownloadNext(m.illustrations[m.currentIndex]),
+			incr,
+		)
+
 	default:
-		if m.progress.Percent() == 1.0 {
-			return m, tea.Quit
-		}
-
-		if currentIndex >= len(illustrations) {
-			return m, tea.Quit
-		}
-
-		cmd := m.progress.IncrPercent(1 / float64(len(illustrations)))
-		return m, tea.Batch(DownloadCmd(), cmd)
+		return m, nil
 	}
 }
 
-func (e model) View() string {
+func (m model) View() string {
 	pad := strings.Repeat(" ", padding)
 	return "\n" +
-		pad + e.progress.View() + "\n\n" +
-		pad + dimStyle(currentFileName) + "\n\n" +
-		BuildDownloadLog() + "\n"
+		pad + m.progress.View() + "\n\n" +
+		pad + dimStyle(m.currentFileName) + "\n\n" +
+		BuildDownloadLog(m.queue, m.errors) + "\n"
 }
 
-func DownloadCmd() tea.Cmd {
-	return (func() tea.Msg {
-		currentIllustration := illustrations[currentIndex]
-		currentFileName = "temp-" + strings.Join(currentIllustration.Tags, "+") + ".jpg"
-		_, err := pixivapi.DownloadIllustration(currentIllustration, currentFileName)
-		downloadLogQueue = append(downloadLogQueue, currentFileName)
-		for len(downloadLogQueue) > maxQueueLength {
-			removed := downloadLogQueue[0]
-			delete(downloadLog, removed)
-			downloadLogQueue = downloadLogQueue[1:]
-		}
-		if err != nil {
-			downloadLog[currentFileName] = true
-		} else {
-			downloadLog[currentFileName] = false
-		}
-		currentIndex = currentIndex + 1
-		return nil
-	})
+type downloadedMsg struct {
+	filename string
+	err      error
 }
 
-func BuildDownloadLog() string {
+func DownloadNext(illustration pixivapi.PixivIllustration) tea.Cmd {
+	return func() tea.Msg {
+		filename := "temp-" + strings.Join(illustration.Tags, "+") + ".jpg"
+		_, err := pixivapi.DownloadIllustration(illustration, filename)
+		return downloadedMsg{filename, err}
+	}
+}
+
+func BuildDownloadLog(filenames []string, statuses map[string]error) string {
 	pad := strings.Repeat(" ", padding)
 	var str string
-	for _, fileName := range downloadLogQueue {
+	for _, name := range filenames {
 		var indicator string
-		status := downloadLog[fileName]
-		if status == true {
-			// There was an error
+		err := statuses[name]
+		if err != nil {
 			indicator = errorStyle("✗")
 		} else {
-			// No error
 			indicator = okStyle("✓")
 		}
-		str += fmt.Sprintf("%s[%s] %s\n", pad, indicator, dimStyle(fileName))
+		str += fmt.Sprintf("%s[%s] %s\n", pad, indicator, dimStyle(name))
 	}
 	return str
 }
