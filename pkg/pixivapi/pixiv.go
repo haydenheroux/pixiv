@@ -3,8 +3,10 @@ package pixivapi
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 )
+
+var defaultHeaders = map[string]string{}
 
 // GetTopIllustrations spoofs Pixiv's AJAX requests to query the top illustrations
 // at the time of the request.
@@ -16,7 +18,7 @@ func GetTopIllustrations() ([]PixivIllustration, error) {
 	}
 	defer res.Body.Close()
 
-	content, err := ioutil.ReadAll(res.Body)
+	content, err := io.ReadAll(res.Body)
 	if err != nil {
 		return make([]PixivIllustration, 0), err
 	}
@@ -34,7 +36,7 @@ func GetSearchIllustrations(query string) ([]PixivIllustration, error) {
 		return make([]PixivIllustration, 0), err
 	}
 	defer res.Body.Close()
-	content, err := ioutil.ReadAll(res.Body)
+	content, err := io.ReadAll(res.Body)
 	if err != nil {
 		return make([]PixivIllustration, 0), err
 	}
