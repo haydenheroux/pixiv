@@ -3,7 +3,10 @@ package main
 import (
 	"fmt"
 	"os"
+	"path"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -41,6 +44,7 @@ type model struct {
 
 	errors          map[string]error
 	queue           []string
+	directory       string
 	currentIndex    int
 	currentFileName string
 }
@@ -88,15 +92,22 @@ func GetResults(search string) tea.Cmd {
 		} else {
 			illustrations, _ = pixivapi.GetSearchIllustrations(search)
 		}
+
+		// NOTE(hayden): dateTimeFromString causes a crash if the UpdateDate is empty
+		illustrations = slices.DeleteFunc(illustrations, func(i pixivapi.PixivIllustration) bool {
+			return len(i.UpdateDate) == 0
+		})
+
 		return illustrationsMsg(illustrations)
 	}
 }
 
-func Resize(m model, width int) model {
-	m.progress.Width = width - padding*2 - 4
-	if m.progress.Width > maxWidth {
-		m.progress.Width = maxWidth
-	}
+// TODO(hayden): Test this
+func (m model) Resize(screenWidth int) model {
+	width := screenWidth - padding*2
+	width = min(width, maxWidth)
+	m.progress.Width = width
+	m.input.Width = width
 	return m
 }
 
@@ -114,7 +125,7 @@ func PushAndCycleQueue(m model, filename string) model {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		return Resize(m, msg.Width), nil
+		return m.Resize(msg.Width), nil
 
 	case progress.FrameMsg:
 		progressModel, cmd := m.progress.Update(msg)
@@ -125,9 +136,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Type {
 		case tea.KeyEnter:
 			m.state = stateRetrieving
+			input := m.input.Value()
+			if len(input) == 0 {
+				m.directory = time.Now().Format(time.DateTime)
+			} else {
+				m.directory = input
+			}
+			_ = os.Mkdir(m.directory, 0755)
 			return m, tea.Batch(
 				m.spinner.Tick,
-				GetResults(m.input.Value()),
+				GetResults(input),
 			)
 		case tea.KeyCtrlC, tea.KeyEsc:
 			return m, tea.Quit
@@ -139,9 +157,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		m.errors = make(map[string]error)
-		// TODO(hayden): State mutex
 		m.state = stateDownloading
-		return m, DownloadNext(m.illustrations[0])
+		return m, DownloadNext(m.directory, m.illustrations[0])
 
 	case downloadedMsg:
 		m = PushAndCycleQueue(m, msg.filename)
@@ -158,7 +175,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		incr := m.progress.IncrPercent(delta)
 
 		return m, tea.Batch(
-			DownloadNext(m.illustrations[m.currentIndex]),
+			DownloadNext(m.directory, m.illustrations[m.currentIndex]),
 			incr,
 		)
 	}
@@ -167,6 +184,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.input, inputCmd = m.input.Update(msg)
 	m.spinner, spinCmd = m.spinner.Update(msg)
 	return m, tea.Batch(inputCmd, spinCmd)
+}
+
+func (m model) InputView() string {
+	pad := strings.Repeat(" ", padding)
+	return pad + m.input.View()
+}
+
+func (m model) SearchView() string {
+	pad := strings.Repeat(" ", padding)
+	return pad + m.spinner.View() + " " + dimStyle.Render(m.input.Value())
 }
 
 func (m model) DownloadingView() string {
@@ -178,14 +205,13 @@ func (m model) DownloadingView() string {
 }
 
 func (m model) View() string {
-	pad := strings.Repeat(" ", padding)
 	switch m.state {
 	case stateInput:
-		return pad + m.input.View()
+		return m.InputView()
 	case stateRetrieving:
-		return pad + m.spinner.View() + " " + dimStyle.Render(m.input.Value())
+		return m.SearchView()
 	case stateDownloading:
-		return m.DownloadingView()
+		return m.InputView() + "\n" + m.DownloadingView()
 	default:
 		return "\n"
 	}
@@ -196,10 +222,11 @@ type downloadedMsg struct {
 	err      error
 }
 
-func DownloadNext(illustration pixivapi.PixivIllustration) tea.Cmd {
+func DownloadNext(directory string, illustration pixivapi.PixivIllustration) tea.Cmd {
 	return func() tea.Msg {
-		filename := "temp-" + strings.Join(illustration.Tags, "+") + ".jpg"
-		_, err := pixivapi.DownloadIllustration(illustration, filename)
+		filename := strings.Join(illustration.Tags, "+") + ".jpg"
+		destination := path.Join(directory, filename)
+		_, err := pixivapi.DownloadIllustration(illustration, destination)
 		return downloadedMsg{filename, err}
 	}
 }
